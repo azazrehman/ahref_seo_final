@@ -43,7 +43,8 @@ async function run(keywordName, url) {
         process.env.HREF_PASSWORD,
         url
       );
-      console.log(`User Logged in successfuly...`);
+      console.log(`User Logged in successfuly...${keywordName}`);
+
       await myHelper.typeText(
         page,
         keywordName,
@@ -91,8 +92,8 @@ async function run(keywordName, url) {
         allDomainRating.push(parseFloat(siteRating));
         await myHelper.click(page, `[id="se_pe_target"]`);
       }
-      console.log(allSiteTraffic);
-      console.log(allDomainRating);
+      //console.log(allSiteTraffic);
+      //console.log(allDomainRating);
       let bestCompetitor = await calculate_best_competitor(
         page,
         allSiteTraffic,
@@ -269,19 +270,28 @@ const port = process.env.PORT || 3050;
 app.get("/find_keywords", async (request, res) => {
   let result = "Default Value";
   try {
-    res.type("text/plain");
-    request.setTimeout(60000 * 10);
-    let url = config.baseURL;
-    let keywordName = request.query.url;
-    result = await run(keywordName, url);
-    let response = (await get_open_api_response(result.Selected_Keyword)).split(
-      "\n"
-    );
-    result.Article_Titles[0] = response[2];
-    result.Article_Titles[1] = response[3];
-    result.Article_Titles[2] = response[4];
-    console.log(`Response Sent: ${result.toString()}`);
-    res.send(result);
+    if (!request.headers.authorization) {
+      return res.status(403).json({ error: "No credentials sent!" });
+    } else {
+      const token = request.headers.authorization.split(" ")[1];
+      if (token == process.env.MY_TOKEN) {
+        res.type("text/plain");
+        request.setTimeout(60000 * 10);
+        let url = config.baseURL;
+        let keywordName = request.query.url;
+        result = await run(keywordName, url);
+        let response = (
+          await get_open_api_response(result.Selected_Keyword)
+        ).split("\n");
+        result.Article_Titles[0] = response[2];
+        result.Article_Titles[1] = response[3];
+        result.Article_Titles[2] = response[4];
+        console.log(`Response Sent: ${result.toString()}`);
+        res.send(result);
+      } else {
+        res.status(401).json({ error: "Invalid credentials sent!" });
+      }
+    }
   } catch (error) {
     res.sendStatus(403);
     res.send(`Error ${error} | Response ${result}`);
