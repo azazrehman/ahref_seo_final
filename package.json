@@ -1,0 +1,31 @@
+{
+  "name": "ahref",
+  "version": "1.0.0",
+  "description": "An Automation Tool",
+  "main": "ui/main.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git."
+  },
+  "keywords": [
+    "Automation",
+    "Ahref",
+    "SEO"
+  ],
+  "author": "Azaz",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.26.0",
+    "commandline": "0.0.2",
+    "delay": "^5.0.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.17.2",
+    "lodash": "^4.17.21",
+    "openai": "^2.0.4",
+    "puppeteer": "^13.1.1",
+    "puppeteer-core": "^13.1.3"
+  }
+}
