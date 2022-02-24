@@ -17,20 +17,32 @@ async function run(keywordName, url) {
   try {
     //Browser Launch
     browser = await puppeteer.launch({
-      headless: false,
+      headless: true,
       slowMo: 5,
       timeout: 120000,
       defaultViewport: null,
       viewport: null,
       setViewportSize: null,
-      args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--start-maximized",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--use-gl=egl",
+        "--disable-extensions",
+        "--disable-dev-shm-usage",
+      ],
     });
     page = await browser.newPage();
     await page.setDefaultNavigationTimeout(60000);
     await page.setDefaultTimeout(60000);
     console.log(`Execution is Started...`);
     try {
-      await login_to_ahref(page, process.env.HREF_USERNAME, process.env.HREF_PASSWORD, url);
+      await login_to_ahref(
+        page,
+        process.env.HREF_USERNAME,
+        process.env.HREF_PASSWORD,
+        url
+      );
       console.log(`User Logged in successfuly...`);
       await myHelper.typeText(
         page,
