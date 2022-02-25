@@ -1,304 +1,382 @@
-const puppeteer = require("puppeteer");
 require("dotenv").config();
 const config = require("./configuration/config");
 const myHelper = require("./lib/puppeteerAPI");
+const puppeteer = require("puppeteer");
 const { Configuration, OpenAIApi } = require("openai");
 const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY,
 });
 const openai = new OpenAIApi(configuration);
+const commonFunction = require("./lib/commonFucntion");
+const express = require("express");
+const { default: axios } = require("axios");
+const app = express();
+const port = process.env.PORT || 3050;
 
-async function run(keywordName, url) {
-  let page,
-    browser,
-    domainRating,
-    competingDomain,
-    result = "Default Value";
+let page,
+  browser,
+  domainRating,
+  competingDomain,
+  result = "Default Value";
+
+async function getDR(keywordName) {
   try {
-    //Browser Launch
     browser = await puppeteer.launch({
-      headless: true,
+      headless: config.headless,
       slowMo: 5,
-      timeout: 120000,
+      timeout: config.waitingTimeout * 2,
       defaultViewport: null,
       viewport: null,
       setViewportSize: null,
-      args: [
-        "--start-maximized",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--use-gl=egl",
-        "--disable-extensions",
-        "--disable-dev-shm-usage",
-      ],
+      args: config.browserArguments,
     });
-    page = await browser.newPage();
-    await page.setDefaultNavigationTimeout(60000);
-    await page.setDefaultTimeout(60000);
+    page = await commonFunction.launch_browser(browser, page);
     console.log(`Execution is Started...`);
-    try {
-      await login_to_ahref(
-        page,
-        process.env.HREF_USERNAME,
-        process.env.HREF_PASSWORD,
-        url
-      );
-      console.log(`User Logged in successfuly...${keywordName}`);
-
-      await myHelper.typeText(
-        page,
-        keywordName,
-        `[placeholder="Domain or URL"]`
-      );
-      await myHelper.clickWithNavigate(
-        page,
-        `[class*="dropdownBorderRight"]~button div`
-      );
-      //await myHelper.click(page,`//h2//*[text()="Home - ${keywordName}"]`)
-      domainRating = await myHelper.getText(
-        page,
-        `[id="DomainRatingContainer"]>span`
-      );
-      await myHelper.clickWithNavigate(
-        page,
-        `[data-nav-type="pe_competing_domains"]`
-      );
-      let sites = await myHelper.getCount(page, `[class="contextMenu blue"]`);
-      let allSiteTraffic = [];
-      let allDomainRating = [];
-      for (let index = 1; index < 11; index++) {
-        await myHelper.click(
-          page,
-          `(//table[@id="main_se_data_table"]//a[@target="_blank"]/following-sibling::span)[${index}]`
-        );
-        let siteTraffic = await myHelper.getText(
-          page,
-          `[id="traffic"]>span[notranslate]`
-        );
-        if (siteTraffic.endsWith("K")) {
-          siteTraffic.replace("K", "");
-          siteTraffic = parseFloat(siteTraffic);
-          siteTraffic = siteTraffic * 1000;
-        } else if (siteTraffic.endsWith("M")) {
-          siteTraffic.replace("M", "");
-          siteTraffic = parseFloat(siteTraffic);
-          siteTraffic = siteTraffic * 1000000;
-        }
-        let siteRating = await myHelper.getText(
-          page,
-          `[id="domain_rating"]>span[notranslate]`
-        );
-        allSiteTraffic.push(siteTraffic);
-        allDomainRating.push(parseFloat(siteRating));
-        await myHelper.click(page, `[id="se_pe_target"]`);
-      }
-      //console.log(allSiteTraffic);
-      //console.log(allDomainRating);
-      let bestCompetitor = await calculate_best_competitor(
-        page,
-        allSiteTraffic,
-        allDomainRating
-      );
-      console.log(`Best Competitor is found at ${bestCompetitor}`);
-      await page.screenshot({
-        path: `Ahref_Best_Competitor_${Number(new Date())}.png`,
-      });
-      unique_compitetor_selector = `(//tbody[@id="container"]//tr[not(contains(@class,"limited"))]//td[4]/a)[${bestCompetitor}]`;
-      competingDomain = await myHelper.getText(
-        page,
-        `(//table[@id="main_se_data_table"]//a[@target="_blank"])[${bestCompetitor}]`
-      );
-      try {
-        await page.waitForXPath(unique_compitetor_selector);
-        const [button] = await page.$x(unique_compitetor_selector);
-        await Promise.all([button.click()]);
-      } catch (error) {
-        console.log(`Error ${error}`);
-      }
-
-      let allKeywordVolume = [];
-      let allKeywordKD = [];
-      await sorting_data(page, "Volume");
-      let maxLimit = await myHelper.getCount(page, `[id^="row_id"]`);
-      if (maxLimit > 16) {
-        //Handle if there is less tahn 15 keywords
-        maxLimit = 15;
-      }
-      for (let index = 1; index <= maxLimit; index++) {
-        let keywordVolume = (
-          await myHelper.getText(page, `(//tr[@id="row_id_${index}"]//td)[2]`)
-        ).replace(/\D/g, "");
-        let keywordKD = (
-          await myHelper.getText(page, `(//tr[@id="row_id_${index}"]//td)[3]`)
-        ).replace(/\D/g, "");
-        allKeywordVolume.push(parseFloat(keywordVolume));
-        allKeywordKD.push(parseFloat(keywordKD));
-      }
-      console.log(allKeywordVolume);
-      console.log(allKeywordKD);
-      await page.screenshot({
-        path: `Ahref_Best_Keywords_${Number(new Date())}.png`,
-      });
-      let index = await calculate_best_keywords(
-        page,
-        allKeywordVolume,
-        allKeywordKD
-      );
-      console.log(`Best Index ${index}`);
-      selectedKeyword = await myHelper.getText(
-        page,
-        `(//tr[@id="row_id_${index}"]//td//a)[1]`
-      );
-
-      await browser.close();
-    } catch (error) {
-      result = result + error;
-      console.log(error);
-    } finally {
-      result = {
-        Your_URL: keywordName,
-        Domain_Rating: domainRating,
-        Competing_Domain: competingDomain,
-        Selected_Keyword: selectedKeyword,
-        Article_Titles: ["", "", ""],
-      };
-      console.log(`Execution is Completed.`);
-      return result;
-    }
+    await commonFunction.login_to_ahref(
+      page,
+      process.env.HREF_USERNAME,
+      process.env.HREF_PASSWORD
+    );
+    console.log(`User Logged in successfuly...${keywordName}`);
+    await myHelper.typeText(page, keywordName, `[placeholder="Domain or URL"]`);
+    await myHelper.click(page, `[class*="dropdownBorderRight"]~button div`);
+    //await myHelper.click(page,`//h2//*[text()="Home - ${keywordName}"]`)
+    domainRating = await myHelper.getText(
+      page,
+      `[id="DomainRatingContainer"]>span`
+    );
+    return domainRating;
   } catch (error) {
-    console.log(error);
+    throw new Error(`Error in GetDR | ${error}`);
   }
 }
-async function login_to_ahref(page, username, password, url) {
+async function getCompetantDomain() {
   try {
-    await page.goto(url, { waitUntil: `networkidle0` });
-    await myHelper.typeText(page, username, `input[type="email"]`);
-    await myHelper.typeText(page, password, `input[type="password"]`);
-    await myHelper.clickWithNavigate(page, `[type="submit"]`);
-    await page.screenshot({ path: `Ahref_Login_${Number(new Date())}.png` });
-    await page.waitForTimeout(3000);
+    await myHelper.clickWithNavigate(
+      page,
+      `[data-nav-type="pe_competing_domains"]`
+    );
+    let sites = await myHelper.getCount(page, `[class="contextMenu blue"]`);
+    let allSiteTraffic = [];
+    let allDomainRating = [];
+    for (let index = 1; index < 11; index++) {
+      await myHelper.click(
+        page,
+        `(//table[@id="main_se_data_table"]//a[@target="_blank"]/following-sibling::span)[${index}]`
+      );
+      let siteTraffic = await myHelper.getText(
+        page,
+        `[id="traffic"]>span[notranslate]`
+      );
+      if (siteTraffic.endsWith("K")) {
+        siteTraffic.replace("K", "");
+        siteTraffic = parseFloat(siteTraffic);
+        siteTraffic = siteTraffic * 1000;
+      } else if (siteTraffic.endsWith("M")) {
+        siteTraffic.replace("M", "");
+        siteTraffic = parseFloat(siteTraffic);
+        siteTraffic = siteTraffic * 1000000;
+      }
+      let siteRating = await myHelper.getText(
+        page,
+        `[id="domain_rating"]>span[notranslate]`
+      );
+      allSiteTraffic.push(siteTraffic);
+      allDomainRating.push(parseFloat(siteRating));
+      await myHelper.click(page, `[id="se_pe_target"]`);
+    }
+    let bestCompetitor = await commonFunction.calculate_best_competitor(
+      page,
+      allSiteTraffic,
+      allDomainRating
+    );
+    console.log(`Best Competitor is found at ${bestCompetitor}`);
     await page.screenshot({
-      path: `Ahref_Login_Success_${Number(new Date())}.png`,
+      path: `Ahref_Best_Competitor_${Number(new Date())}.png`,
     });
+    unique_compitetor_selector = `(//tbody[@id="container"]//tr[not(contains(@class,"limited"))]//td[4]/a)[${bestCompetitor}]`;
+    competingDomain = await myHelper.getText(
+      page,
+      `(//table[@id="main_se_data_table"]//a[@target="_blank"])[${bestCompetitor}]`
+    );
+    try {
+      await page.waitForXPath(unique_compitetor_selector);
+      const [button] = await page.$x(unique_compitetor_selector);
+      await Promise.all([button.click()]);
+    } catch (error) {
+      console.log(`Error ${error}`);
+    }
+    return competingDomain;
   } catch (error) {
-    throw new Error(`Error While Login to Ahref | ${error}`);
+    throw new Error(`Error in Get Competant Domain | ${error}`);
   }
 }
-async function calculate_best_competitor(
-  page,
-  allSiteTraffic,
-  allDomainRating
-) {
-  let competitor = 0;
+async function getSelectedKeyword() {
   try {
-    //Make sure you don't chnage the origianl array index
-    //Do some stuff to get the Best compitetor
-    //(organicTraffic * 1) / (DR distance) * 1
-
-    let calculated_values = [];
-    for (let index = 0; index < allSiteTraffic.length; index++) {
-      let value = (allSiteTraffic[index] * 1) / (allDomainRating[index] * 1);
-      calculated_values.push(value);
+    let allKeywordVolume = [];
+    let allKeywordKD = [];
+    await commonFunction.sorting_data(page, "Volume");
+    let maxLimit = await myHelper.getCount(page, `[id^="row_id"]`);
+    if (maxLimit > 16) {
+      //Handle if there is less tahn 15 keywords
+      maxLimit = 15;
     }
-
-    //Using Custom Loop insatd of indexOf(Max) because of perfomance
-    var max = calculated_values[0];
-    competitor = 0;
-    for (let index = 0; index < calculated_values.length; index++) {
-      if (calculated_values[index] > max) {
-        competitor = index;
-        max = calculated_values[index];
-      }
+    for (let index = 1; index <= maxLimit; index++) {
+      let keywordVolume = (
+        await myHelper.getText(page, `(//tr[@id="row_id_${index}"]//td)[2]`)
+      ).replace(/\D/g, "");
+      let keywordKD = (
+        await myHelper.getText(page, `(//tr[@id="row_id_${index}"]//td)[3]`)
+      ).replace(/\D/g, "");
+      allKeywordVolume.push(parseFloat(keywordVolume));
+      allKeywordKD.push(parseFloat(keywordKD));
     }
-  } catch (error) {
-    console.log(`Error While Calculating Best competitor ${error}`);
-  }
-  return competitor + 1;
-}
-async function sorting_data(page, item_to_sort) {
-  try {
-    //Handling Sorting stuff Here
-  } catch (error) {}
-}
-async function get_open_api_response(keyword) {
-  let data = "My Default Data";
-  try {
-    data = await openai.createCompletion("text-davinci-001", {
-      //prompt: `Please give me three titles for articles with the following theme: mail`,
-      prompt: `Please give me three titles for articles with the following theme: ${keyword}`,
-      temperature: 0.7,
-      max_tokens: 64,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
+    console.log(allKeywordVolume);
+    console.log(allKeywordKD);
+    await page.screenshot({
+      path: `Ahref_Best_Keywords_${Number(new Date())}.png`,
     });
-    console.log(data.data.choices[0].text);
-    return data.data.choices[0].text;
+    let index = await commonFunction.calculate_best_keywords(
+      page,
+      allKeywordVolume,
+      allKeywordKD
+    );
+    console.log(`Best Index ${index}`);
+    selectedKeyword = await myHelper.getText(
+      page,
+      `(//tr[@id="row_id_${index}"]//td//a)[1]`
+    );
+    return selectedKeyword;
   } catch (error) {
-    console.log(`error: `, error);
+    throw new Error(`Error while getting the best keyword ${error}`);
   }
-  return data;
 }
-async function calculate_best_keywords(page, allKeywordVolume, allKeywordKD) {
-  let index = 0;
+async function getArticleList(keyword) {
   try {
-    //Make sure you don't chnage the origianl array index
-    //Do some stuff to get the Best Keyword
-    //(volume) * 1 / (keyword difficulty) * 1
-    let calculated_values = [];
-    for (let index = 0; index < allKeywordVolume.length; index++) {
-      let value = (allKeywordVolume[index] * 1) / (allKeywordKD[index] * 1);
-      calculated_values.push(value);
-    }
-    //Using Custom Loop insatd of indexOf(Max) because of perfomance
-    var max = calculated_values[0];
-    competitor = 0;
-    for (let index = 0; index < calculated_values.length; index++) {
-      if (calculated_values[index] > max) {
-        competitor = index;
-        max = calculated_values[index];
-      }
-    }
+    let response = (
+      await commonFunction.get_open_api_response(keyword, openai)
+    ).split("\n");
+    return response;
   } catch (error) {
-    console.log(`Error While Calculating Best Keyword ${error}`);
+    throw new Error(
+      `Error while getting the Article List from OpenAI ${error}`
+    );
   }
-  return index + 1;
 }
-const express = require("express");
-const app = express();
-const port = process.env.PORT || 3050;
-app.get("/find_keywords", async (request, res) => {
-  let result = "Default Value";
+async function getSurfSEOURL(keyword) {
   try {
-    if (!request.headers.authorization) {
-      return res.status(403).json({ error: "No credentials sent!" });
+    let bodyData = {
+      keywords: ["${keyword}"],
+      location: "United States",
+      word_count: 2137,
+    };
+    const options = {
+      headers: {
+        "API-KEY": process.env.API_KEY_SURF,
+        "Content-Type": "application/json",
+      },
+    };
+    let response = await axios.post(
+      `https://app.surferseo.com/api/v1/content_editors`,
+      bodyData,
+      options
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(`Error while getting the Response from Surf SEO ${error}`);
+  }
+}
+
+app.get("/full-flow", async (request, res) => {
+  let result = {
+    Your_URL: "keywordName",
+    Domain_Rating: "domainRating",
+    Competing_Domain: "competingDomain",
+    Selected_Keyword: "selectedKeyword",
+    Article_Titles: ["", "", ""],
+  };
+  try {
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_URL = request.query.url;
+      result.Domain_Rating = await getDR(request.query.url);
+      result.Competing_Domain = await getCompetantDomain();
+      result.Selected_Keyword = await getSelectedKeyword();
+      let response = await getArticleList(result.Selected_Keyword);
+      result.Article_Titles[0] = response[2];
+      result.Article_Titles[1] = response[3];
+      result.Article_Titles[2] = response[4];
+      console.log(`Response Sent: ${result.toString()}`);
+      res.send(result);
     } else {
-      const token = request.headers.authorization.split(" ")[1];
-      if (token == process.env.MY_TOKEN) {
-        res.type("text/plain");
-        request.setTimeout(60000 * 10);
-        let url = config.baseURL;
-        let keywordName = request.query.url;
-        result = await run(keywordName, url);
-        let response = (
-          await get_open_api_response(result.Selected_Keyword)
-        ).split("\n");
-        result.Article_Titles[0] = response[2];
-        result.Article_Titles[1] = response[3];
-        result.Article_Titles[2] = response[4];
-        console.log(`Response Sent: ${result.toString()}`);
-        res.send(result);
-      } else {
-        res.status(401).json({ error: "Invalid credentials sent!" });
-      }
+      console.log(`Execution End... For SurfSEO | Unauthorized`);
+      res.status(401).json({ error: "Invalid credentials sent!" });
     }
   } catch (error) {
-    res.sendStatus(403);
-    res.send(`Error ${error} | Response ${result}`);
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    await commonFunction.close_browser(browser, page);
+    console.log(`Execution Completed.`);
   }
 });
-
+app.get("/generate-surferseo-post", async (request, res) => {
+  let result = {
+    Your_Keyword: "keywordName",
+    Response_Received: "DefaultURL",
+  };
+  try {
+    console.log(`Execution Started... For SurfSEO`);
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_Keyword = request.query.keyword;
+      result.URL_Received = await getSurfSEOURL(request.query.keyword);
+      res.send(result);
+    } else {
+      console.log(`Execution End... For SurfSEO | Unauthorized`);
+      res.status(401).json({ error: "Invalid credentials sent!" });
+    }
+  } catch (error) {
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    // await commonFunction.close_browser(browser,page);
+    console.log(`Execution Completed.`);
+  }
+});
+app.get("/generate-article-titles", async (request, res) => {
+  let result = {
+    Your_URL: "keywordName",
+    Domain_Rating: "domainRating",
+    Competing_Domain: "competingDomain",
+    Selected_Keyword: "selectedKeyword",
+    Article_Titles: ["", "", ""],
+  };
+  try {
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_URL = request.query.url;
+      result.Domain_Rating = await getDR(request.query.url);
+      result.Competing_Domain = await getCompetantDomain();
+      result.Selected_Keyword = await getSelectedKeyword();
+      let response = await getArticleList(result.Selected_Keyword);
+      result.Article_Titles[0] = response[2];
+      result.Article_Titles[1] = response[3];
+      result.Article_Titles[2] = response[4];
+      console.log(`Response Sent: ${result.toString()}`);
+      res.send(result);
+    } else {
+      console.log(`Execution End... | Unauthorized`);
+      res.status(401).json({ error: "Invalid credentials sent!" });
+    }
+  } catch (error) {
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    await commonFunction.close_browser(browser, page);
+    console.log(`Execution Completed.`);
+  }
+});
+app.get("/get-best-keywords", async (request, res) => {
+  let result = {
+    Your_URL: "keywordName",
+    Domain_Rating: "domainRating",
+    Competing_Domain: "competingDomain",
+    Selected_Keyword: "selectedKeyword",
+  };
+  try {
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_URL = request.query.url;
+      result.Domain_Rating = await getDR(request.query.url);
+      result.Competing_Domain = await getCompetantDomain();
+      result.Selected_Keyword = await getSelectedKeyword();
+      console.log(`Response Sent: ${result.toString()}`);
+      res.send(result);
+    } else {
+      res.status(401).json({ error: "Invalid credentials sent!" });
+    }
+  } catch (error) {
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    await commonFunction.close_browser(browser, page);
+    console.log(`Execution Completed.`);
+  }
+});
+app.get("/get-competing-domains", async (request, res) => {
+  let result = {
+    Your_URL: "keywordName",
+    Domain_Rating: "domainRating",
+    Competing_Domain: "competingDomain",
+  };
+  try {
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_URL = request.query.url;
+      result.Domain_Rating = await getDR(request.query.url);
+      result.Competing_Domain = await getCompetantDomain();
+      console.log(`Response Sent: ${result.toString()}`);
+      res.send(result);
+    } else {
+      res.status(401).json({ error: "Invalid credentials sent!" });
+    }
+  } catch (error) {
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    await commonFunction.close_browser(browser, page);
+    console.log(`Execution Completed.`);
+  }
+});
+app.get("/get-DR", async (request, res) => {
+  let result = {
+    Your_URL: "keywordName",
+    Domain_Rating: "domainRating",
+  };
+  try {
+    let authentic = await commonFunction.is_authentic(
+      request,
+      process.env.MY_TOKEN
+    );
+    if (authentic) {
+      res.type("text/plain");
+      request.setTimeout(60000 * 10);
+      result.Your_URL = request.query.url;
+      result.Domain_Rating = await getDR(request.query.url);
+      console.log(`Response Sent: ${result.toString()}`);
+      res.send(result);
+    } else {
+      res.status(401).json({ error: "Invalid credentials sent!" });
+    }
+  } catch (error) {
+    res.status(403).send(`Error: ${error}`);
+  } finally {
+    await commonFunction.close_browser(browser, page);
+    console.log(`Execution Completed.`);
+  }
+});
 app.use(express.json());
 app.listen(port, () =>
-  console.log(`Expresso ☕ is on Port ${port} Ctrl + C to Stop `)
+  console.log(`Espresso ☕ is on Port ${port} Ctrl + C to Stop `)
 );
